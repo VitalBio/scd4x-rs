@@ -1,6 +1,7 @@
-use embedded_hal as hal;
-use hal::delay::DelayNs;
-use hal::i2c::I2c;
+use embedded_hal::blocking::{
+    delay::DelayMs,
+    i2c::{Read, Write},
+};
 
 use crate::commands::Command;
 use crate::error::Error;
@@ -24,8 +25,8 @@ pub struct Scd4x<I2C, D> {
 
 impl<I2C, D, E> Scd4x<I2C, D>
 where
-    I2C: I2c<Error = E>,
-    D: DelayNs,
+    I2C: Read<Error = E> + Write<Error = E>,
+    D: DelayMs<u32>,
 {
     pub fn new(i2c: I2C, delay: D) -> Self {
         Scd4x {
@@ -342,7 +343,7 @@ fn check_frc_correction<E>(frc_correction: u16) -> Result<i16, Error<E>> {
 
 #[cfg(test)]
 mod tests {
-    use embedded_hal_mock::eh1 as hal;
+    use embedded_hal_mock::eh0 as hal;
 
     use self::hal::delay::NoopDelay as DelayMock;
     use self::hal::i2c::{Mock as I2cMock, Transaction};

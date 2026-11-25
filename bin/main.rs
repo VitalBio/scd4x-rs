@@ -1,5 +1,5 @@
-use embedded_hal::delay::DelayNs;
-use hal::{Delay, I2CError, I2cdev};
+use embedded_hal::blocking::delay::DelayMs;
+use hal::{Delay, I2cdev, i2cdev::linux::LinuxI2CError};
 use linux_embedded_hal as hal;
 
 use log::{debug, error, info};
@@ -36,7 +36,7 @@ pub struct Options {
     level: LevelFilter,
 }
 
-fn main() -> Result<(), Error<I2CError>> {
+fn main() -> Result<(), Error<LinuxI2CError>> {
     // Load options
     let opts = Options::parse();
 

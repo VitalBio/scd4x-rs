@@ -1,4 +1,3 @@
-use embedded_hal as hal;
 use sensirion_i2c::i2c;
 
 /// SCD4X errors
@@ -36,15 +35,26 @@ impl<E: core::fmt::Debug> core::fmt::Display for Error<E> {
     }
 }
 
-impl<I2C> From<i2c::Error<I2C>> for Error<I2C::Error>
-where
-    I2C: hal::i2c::ErrorType,
-{
-    fn from(err: i2c::Error<I2C>) -> Self {
+impl<E> From<i2c::Error<E>> for Error<E> {
+    fn from(err: i2c::Error<E>) -> Self {
         match err {
             i2c::Error::Crc => Error::Crc,
-            i2c::Error::I2cWrite(e) => Error::I2c(e),
-            i2c::Error::I2cRead(e) => Error::I2c(e),
+            i2c::Error::I2cWrite(e) | i2c::Error::I2cRead(e) => Error::I2c(e),
+        }
+    }
+}
+
+#[cfg(feature = "embedded-hal-async")]
+impl<I2C> From<sensirion_i2c::i2c_async::Error<I2C>> for Error<I2C::Error>
+where
+    I2C: embedded_hal_async::i2c::ErrorType,
+{
+    fn from(err: sensirion_i2c::i2c_async::Error<I2C>) -> Self {
+        use sensirion_i2c::i2c_async::Error as AsyncError;
+
+        match err {
+            AsyncError::Crc => Error::Crc,
+            AsyncError::I2cWrite(e) | AsyncError::I2cRead(e) => Error::I2c(e),
         }
     }
 }

@@ -6,8 +6,7 @@
 //!
 //! This crate has optional support for the [`embedded-hal-async`] crate. The
 //! [`Scd4xAsync`] type provides a driver for a SCD4x sensor which uses
-//! [`embedded-hal-async`]'s asynchronous versions of the `I2c` and `DelayNs`
-//! traits, rather than the blocking versions from [`embedded-hal`].
+//! the `I2c` and `DelayNs` traits from [`embedded-hal-async`].
 //!
 //! The [`embedded-hal-async`] support is feature flagged, so that users who
 //! don't need the asynchronous versions of these traits don't have to depend on
