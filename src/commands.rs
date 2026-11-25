@@ -70,7 +70,7 @@ impl Command {
     // Command, execution time ms, possibility to execute during measurements.
     pub fn as_tuple(self) -> (u16, u32, bool) {
         match self {
-            Self::StartPeriodicMeasurement => (0x21B1, 1, false),
+            Self::StartPeriodicMeasurement => (0x21B1, 0, false),
             Self::ReadMeasurement => (0xEC05, 1, true),
             Self::StopPeriodicMeasurement => (0x3F86, 500, true),
             Self::SetTemperatureOffset => (0x241D, 1, false),
