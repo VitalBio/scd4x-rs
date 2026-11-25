@@ -48,10 +48,18 @@ where
         Ok(())
     }
 
-    /// Stop periodic measurement and return to idle mode for sensor configuration or to safe energy.
-    /// This command is only available in measurement mode.
+    /// Stop periodic measurement and wait for the sensor to return to idle mode.
     pub fn stop_periodic_measurement(&mut self) -> Result<(), Error<E>> {
         self.write_command(Command::StopPeriodicMeasurement)?;
+        self.is_running = false;
+        Ok(())
+    }
+
+    /// Send the stop command without waiting for the sensor to return to idle mode.
+    ///
+    /// Wait 500 ms before sending another command.
+    pub fn stop_periodic_measurement_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::StopPeriodicMeasurementNonBlocking)?;
         self.is_running = false;
         Ok(())
     }
@@ -105,13 +113,35 @@ where
         Ok(())
     }
 
-    /// Perform forced recalibration
+    /// Perform forced recalibration and return the signed CO₂ correction in ppm.
     pub fn forced_recalibration(&mut self, target_co2_concentration: u16) -> Result<i16, Error<E>> {
-        let frc_correction = self.delayed_read_cmd_with_data(
+        self.write_command_with_data(
             Command::PerformForcedRecalibration,
             target_co2_concentration,
         )?;
-        check_frc_correction(frc_correction)
+        self.read_forced_recalibration_result()
+    }
+
+    /// Start forced recalibration without waiting for the result.
+    ///
+    /// Wait 400 ms, then call [`Self::read_forced_recalibration_result`] before sending
+    /// another command.
+    pub fn forced_recalibration_non_blocking(
+        &mut self,
+        target_co2_concentration: u16,
+    ) -> Result<(), Error<E>> {
+        self.write_command_with_data(
+            Command::PerformForcedRecalibrationNonBlocking,
+            target_co2_concentration,
+        )
+    }
+
+    /// Read the signed CO₂ correction in ppm from a completed forced recalibration.
+    ///
+    /// Call this at least 400 ms after [`Self::forced_recalibration_non_blocking`].
+    /// Returns [`Error::Internal`] if the sensor reports that recalibration failed.
+    pub fn read_forced_recalibration_result(&mut self) -> Result<i16, Error<E>> {
+        check_frc_correction(self.read_response_word()?)
     }
 
     /// Get the status of automatic self-calibration
@@ -165,6 +195,13 @@ where
         Ok(())
     }
 
+    /// Start saving settings to non-volatile memory. Return after sending the command.
+    ///
+    /// Wait 800 ms before sending another command.
+    pub fn persist_settings_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::PersistSettingsNonBlocking)
+    }
+
     /// Get 48-bit serial number
     pub fn serial_number(&mut self) -> Result<u64, Error<E>> {
         let mut buf = [0; 9];
@@ -173,13 +210,24 @@ where
         Ok(serial_number_from_bytes(buf))
     }
 
-    ///  End-of-line test to confirm sensor functionality.
+    /// Run the sensor self-test, wait for it to complete, and return whether it passed.
     pub fn self_test_is_ok(&mut self) -> Result<bool, Error<E>> {
-        let mut buf = [0; 3];
-        self.delayed_read_cmd(Command::PerformSelfTest, &mut buf)?;
+        self.write_command(Command::PerformSelfTest)?;
+        self.read_self_test_result()
+    }
 
-        let status = u16::from_be_bytes([buf[0], buf[1]]) == 0;
-        Ok(status)
+    /// Start the sensor self-test without waiting for the result.
+    ///
+    /// Wait 10 seconds, then call [`Self::read_self_test_result`] before sending another command.
+    pub fn self_test_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::PerformSelfTestNonBlocking)
+    }
+
+    /// Read whether a completed sensor self-test passed.
+    ///
+    /// Call this at least 10 seconds after [`Self::self_test_non_blocking`].
+    pub fn read_self_test_result(&mut self) -> Result<bool, Error<E>> {
+        Ok(self.read_response_word()? == 0)
     }
 
     /// Initiates the reset of all configurations stored in the EEPROM and erases the FRC and ASC algorithm history.
@@ -188,10 +236,24 @@ where
         Ok(())
     }
 
+    /// Start resetting the sensor to its factory settings. Return after sending the command.
+    ///
+    /// Wait 1,200 ms before sending another command.
+    pub fn factory_reset_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::PerformFactoryResetNonBlocking)
+    }
+
     /// The reinit command reinitializes the sensor by reloading user settings from EEPROM.
     pub fn reinit(&mut self) -> Result<(), Error<E>> {
         self.write_command(Command::Reinit)?;
         Ok(())
+    }
+
+    /// Start reloading the sensor settings from EEPROM. Return after sending the command.
+    ///
+    /// Allow 30 ms before sending another command.
+    pub fn reinit_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::ReinitNonBlocking)
     }
 
     /// On-demand measurement of CO₂ concentration, relative humidity and temperature.
@@ -203,13 +265,12 @@ where
         Ok(())
     }
 
-    /// On-demand measurement of CO₂ concentration, relative humidity and temperature.
-    /// The sensor output is read with the measurement method.
-    /// Completes immediately, but the measurement can only be read after 5 seconds.
+    /// Start a single-shot CO₂, humidity, and temperature measurement.
+    ///
+    /// Wait 5 seconds before calling [`Self::measurement`].
     #[cfg(feature = "scd41")]
     pub fn measure_single_shot_non_blocking(&mut self) -> Result<(), Error<E>> {
-        self.write_command(Command::MeasureSingleShotNonBlocking)?;
-        Ok(())
+        self.write_command(Command::MeasureSingleShotNonBlocking)
     }
 
     /// On-demand measurement of relative humidity and temperature only.
@@ -217,6 +278,14 @@ where
     pub fn measure_single_shot_rht(&mut self) -> Result<(), Error<E>> {
         self.write_command(Command::MeasureSingleShotRhtOnly)?;
         Ok(())
+    }
+
+    /// Start a single-shot humidity and temperature measurement. Return after sending the command.
+    ///
+    /// Wait 50 ms before calling [`Self::measurement`].
+    #[cfg(feature = "scd41")]
+    pub fn measure_single_shot_rht_non_blocking(&mut self) -> Result<(), Error<E>> {
+        self.write_command(Command::MeasureSingleShotRhtOnlyNonBlocking)
     }
 
     /// Put the sensor from idle to sleep mode to reduce current consumption.
@@ -233,6 +302,14 @@ where
         self.write_command(Command::WakeUp).ok();
     }
 
+    /// Send the wake-up command and return as soon as the I²C transfer ends.
+    ///
+    /// Allow 30 ms before sending another command. The sensor may leave the command unacknowledged.
+    #[cfg(feature = "scd41")]
+    pub fn wake_up_non_blocking(&mut self) {
+        self.write_command(Command::WakeUpNonBlocking).ok();
+    }
+
     /// Command for reading values from the sensor
     fn delayed_read_cmd(&mut self, cmd: Command, data: &mut [u8]) -> Result<(), Error<E>> {
         self.write_command(cmd)?;
@@ -240,38 +317,37 @@ where
         Ok(())
     }
 
-    /// Send command with parameter, takes response
-    fn delayed_read_cmd_with_data(&mut self, cmd: Command, data: u16) -> Result<u16, Error<E>> {
-        self.write_command_with_data(cmd, data)?;
+    /// Read one CRC-checked word from a response to a command already sent.
+    fn read_response_word(&mut self) -> Result<u16, Error<E>> {
         let mut buf = [0; 3];
         i2c::read_words_with_crc(&mut self.i2c, SCD4X_I2C_ADDRESS, &mut buf)?;
-
         Ok(u16::from_be_bytes([buf[0], buf[1]]))
     }
 
-    /// Writes commands without additional arguments.
     fn write_command(&mut self, cmd: Command) -> Result<(), Error<E>> {
         let (command, delay, allowed_if_running) = cmd.as_tuple();
         if !allowed_if_running && self.is_running {
             return Err(Error::NotAllowed);
         }
         i2c::write_command_u16(&mut self.i2c, SCD4X_I2C_ADDRESS, command).map_err(Error::I2c)?;
-        self.delay.delay_ms(delay);
+        if delay > 0 {
+            self.delay.delay_ms(delay);
+        }
         Ok(())
     }
 
-    /// Sets sensor internal parameter
     fn write_command_with_data(&mut self, cmd: Command, data: u16) -> Result<(), Error<E>> {
         let (command, delay, allowed_if_running) = cmd.as_tuple();
         if !allowed_if_running && self.is_running {
             return Err(Error::NotAllowed);
         }
         let buf = encode_cmd_with_data(command, data);
-
         self.i2c
             .write(SCD4X_I2C_ADDRESS, &buf)
             .map_err(Error::I2c)?;
-        self.delay.delay_ms(delay);
+        if delay > 0 {
+            self.delay.delay_ms(delay);
+        }
         Ok(())
     }
 }
@@ -352,6 +428,55 @@ mod tests {
     /// Build a 3-byte response word: [msb, lsb, crc]
     fn word(msb: u8, lsb: u8) -> [u8; 3] {
         [msb, lsb, crc8::calculate(&[msb, lsb])]
+    }
+
+    #[test]
+    fn test_non_blocking_commands_and_response_reads_skip_delays() {
+        struct UnexpectedDelay;
+
+        impl DelayMs<u32> for UnexpectedDelay {
+            fn delay_ms(&mut self, ms: u32) {
+                panic!("unexpected delay of {ms} ms");
+            }
+        }
+
+        let expectations = [
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x3f, 0x86]),
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x36, 0x15]),
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x36, 0x32]),
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x36, 0x46]),
+            Transaction::write(
+                SCD4X_I2C_ADDRESS,
+                [[0x36, 0x2f].as_slice(), &word(0x01, 0x90)].concat(),
+            ),
+            Transaction::read(SCD4X_I2C_ADDRESS, word(0x7f, 0xff).to_vec()),
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x36, 0x39]),
+            Transaction::read(SCD4X_I2C_ADDRESS, vec![0, 0, word(0, 0)[2] ^ 1]),
+            #[cfg(feature = "scd41")]
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x21, 0x9d]),
+            #[cfg(feature = "scd41")]
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x21, 0x96]),
+            #[cfg(feature = "scd41")]
+            Transaction::write(SCD4X_I2C_ADDRESS, vec![0x36, 0xf6]),
+        ];
+        let mut sensor = Scd4x::new(I2cMock::new(&expectations), UnexpectedDelay);
+
+        sensor.stop_periodic_measurement_non_blocking().unwrap();
+        sensor.persist_settings_non_blocking().unwrap();
+        sensor.factory_reset_non_blocking().unwrap();
+        sensor.reinit_non_blocking().unwrap();
+        sensor.forced_recalibration_non_blocking(400).unwrap();
+        assert_eq!(sensor.read_forced_recalibration_result(), Ok(-1));
+        sensor.self_test_non_blocking().unwrap();
+        assert_eq!(sensor.read_self_test_result(), Err(Error::Crc));
+        #[cfg(feature = "scd41")]
+        {
+            sensor.measure_single_shot_non_blocking().unwrap();
+            sensor.measure_single_shot_rht_non_blocking().unwrap();
+            sensor.wake_up_non_blocking();
+        }
+
+        sensor.destroy().done();
     }
 
     /// Test the get_serial_number function
